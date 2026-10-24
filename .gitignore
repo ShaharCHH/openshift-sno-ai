@@ -1,0 +1,7 @@
+*.tfvars
+!*.tfvars.example
+.ignition/
+*.tfstate
+*.tfstate.*
+.terraform/
+SESSION_STATE.md
