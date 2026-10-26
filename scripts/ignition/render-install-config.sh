@@ -58,7 +58,7 @@ tfvars="$repo_root/accounts/${account_alias}.tfvars"
 master_instance_type=$(read_tfvar master_instance_type "$tfvars")
 master_instance_type="${master_instance_type:-m5.xlarge}"
 master_count=$(read_tfvar master_count "$tfvars")
-master_count="${master_count:-3}"
+master_count="${master_count:-1}" # single-node: keep in step with terraform/variables.tf
 
 echo "Reading install_config_inputs from terraform output..." >&2
 inputs=$(cd "$repo_root/terraform" && terraform output -json install_config_inputs)
