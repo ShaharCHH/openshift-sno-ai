@@ -37,3 +37,21 @@ Two controllers each undo a manual fix:
 The `storage` clusteroperator stays Degraded/Unavailable (the EBS driver
 deployment can never start without a credential), as does `image-registry` until
 it is given a PVC, and `network` stays Progressing. Same root cause; do not chase.
+
+## Image registry on LVMS
+`day2/setup-registry.sh -a <alias>` creates a 20 GiB RWO PVC on `lvms-vg1`
+(`manifests/registry/registry-pvc.yaml`) and points the registry operator at it
+(replicas 1, `rolloutStrategy: Recreate`, `s3: null` and `pvc.claim` in one patch).
+`lvms-vg1` binds `WaitForFirstConsumer`, so the PVC is `Pending` until the
+registry pod exists -- the script does not wait for `Bound` before patching.
+
+Verified on OCP 4.22.9: PVC `Bound` ~30 s after the patch, `image-registry`
+Available. `openshift-apiserver` briefly went Available=False right after
+(single-node pod restart) and recovered by itself within ~2 min; the cause was
+not confirmed.
+
+`day2/post-install-cleanup.sh -a <alias>` is a read-only check of the end state:
+`storageClassState=Unmanaged`, `lvms-vg1` sole default, registry Available and
+Bound, then `scripts/check-known-inert.sh` for `storage` and `network`.
+It does not try `ClusterCSIDriver managementState: Removed` -- see the table
+above, the operator refuses it.

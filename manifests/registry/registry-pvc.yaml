@@ -1,0 +1,18 @@
+# Backing store for the internal image registry. Names lvms-vg1 explicitly
+# rather than relying on the default class: the registry must never depend on
+# the default-class flag that the EBS CSI operator and LVMS fight over
+# (docs/storage.md). RWO is fine -- SNO runs one registry replica, and
+# day2/setup-registry.sh sets rolloutStrategy Recreate so a rollout never needs
+# two pods holding the volume.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: image-registry-storage
+  namespace: openshift-image-registry
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: lvms-vg1
+  resources:
+    requests:
+      storage: 20Gi

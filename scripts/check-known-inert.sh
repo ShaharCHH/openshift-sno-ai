@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
-# Confirms the three operators this platform expects to stay broken forever
-# are broken for the EXPECTED reason -- not just that they're broken. See
-# docs/runbook.md's "Known-inert, do not chase": control-plane-machine-set
-# Degraded, storage Degraded, and network Progressing all trace to the same
-# missing cloud credential (docs/architecture.md). A genuinely new failure
+# Confirms the two operators this platform expects to stay broken forever
+# (storage Degraded, network Progressing) are broken for the EXPECTED reason
+# -- not just that they're broken -- and that image-registry, which
+# day2/setup-registry.sh fixes, is Available. Both inert ones trace to the
+# same missing cloud credential (docs/storage.md). A UPI install has no
+# Machine objects, so the source repo's control-plane-machine-set check does
+# not apply here. A genuinely new failure
 # can hide behind "oh, that's the known one" if nobody actually reads the
 # condition message -- this is meant to be run whenever something looks off,
 # not just once after install.
@@ -42,21 +44,21 @@ command -v oc >/dev/null 2>&1 || {
 
 oc_cmd() { oc --kubeconfig "$kubeconfig" "$@"; }
 
-cpms_msg=$(oc_cmd get machine.machine.openshift.io -n openshift-machine-api -o jsonpath='{.items[0].status.conditions[?(@.type=="InstanceExists")].message}' 2>/dev/null || echo "")
 storage_msg=$(oc_cmd get co storage -o jsonpath='{.status.conditions[?(@.type=="Degraded")].message}' 2>/dev/null || echo "")
 network_msg=$(oc_cmd get co network -o jsonpath='{.status.conditions[?(@.type=="Progressing")].message}' 2>/dev/null || echo "")
+registry_avail=$(oc_cmd get co image-registry -o jsonpath='{.status.conditions[?(@.type=="Available")].status}' 2>/dev/null || echo "")
 
-echo "control-plane-machine-set / machine InstanceExists: $cpms_msg"
-echo "storage Degraded:                                   $storage_msg"
-echo "network Progressing:                                $network_msg"
+echo "storage Degraded:                 $storage_msg"
+echo "network Progressing:              $network_msg"
+echo "image-registry Available:         $registry_avail"
 
-# storage's Degraded message has two possible shapes depending on whether
-# day2/post-install-cleanup.sh's ClusterCSIDriver lever ever stuck on this
-# platform, so it's printed above for a human to read rather than
-# pattern-matched here.
+# The EBS CSI driver's controller deployment can never start without a cloud
+# credential; the network operator waits on cloud-network-config-controller
+# for the same reason. These are the messages seen on a live 4.22.9 cluster.
 any_unexpected=false
-case "$cpms_msg" in *"aws credentials secret"*|*"aws-cloud-credentials"*) ;; *) any_unexpected=true ;; esac
-case "$network_msg" in *"cloud-credentials"*|*"cloud-provider-secret"*) ;; *) any_unexpected=true ;; esac
+case "$storage_msg" in *AWSEBSDriverControllerService*) ;; *) any_unexpected=true ;; esac
+case "$network_msg" in *cloud-network-config-controller*) ;; *) any_unexpected=true ;; esac
+[ "$registry_avail" = "True" ] || any_unexpected=true
 
 if [ "$any_unexpected" = "true" ]; then
   echo
@@ -67,4 +69,4 @@ if [ "$any_unexpected" = "true" ]; then
 fi
 
 echo
-echo "OK: all three match the expected credential-wall reason."
+echo "OK: storage and network are broken for the expected reason; image-registry is Available."
