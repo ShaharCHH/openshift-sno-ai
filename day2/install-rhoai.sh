@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Installs the Red Hat OpenShift AI operator (channel stable-3.x) and waits for
-# its CSV to succeed. The DataScienceCluster is a separate step (manifests/rhoai/
-# 10-datasciencecluster.yaml, applied once the operator's CRDs exist).
+# its CSV to succeed. With --dsc it also applies manifests/rhoai/10-datasciencecluster.yaml
+# (kept opt-in so node headroom can be checked between the two).
 #
 # Idempotent: every step is an `oc apply` and the waits return at once when the
 # thing is already ready. Safe to re-run on a live cluster.
@@ -11,13 +11,15 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "$script_dir/.." && pwd)"
 
 usage() {
-  echo "usage: install-rhoai.sh -a <account-alias> [--dry-run]" >&2
+  echo "usage: install-rhoai.sh -a <account-alias> [--dsc] [--dry-run]" >&2
+  echo "  --dsc      also apply the DataScienceCluster and wait for it to be Ready" >&2
   echo "  --dry-run  server-side dry run of the manifests; changes nothing" >&2
   exit 1
 }
 
 account_alias=""
 dry_run=false
+with_dsc=false
 while [ $# -gt 0 ]; do
   case "$1" in
     -a)
@@ -26,6 +28,10 @@ while [ $# -gt 0 ]; do
       ;;
     --dry-run)
       dry_run=true
+      shift
+      ;;
+    --dsc)
+      with_dsc=true
       shift
       ;;
     *) usage ;;
@@ -94,6 +100,19 @@ wait_for 900 "rhods-operator CSV Succeeded" csv_succeeded || {
   exit 1
 }
 wait_for 120 "DataScienceCluster CRD registered" oc get crd datascienceclusters.datasciencecluster.opendatahub.io || exit 1
+
+dsc_ready() {
+  [ "$(oc get dsc default-dsc -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null)" = "True" ]
+}
+
+if $with_dsc; then
+  echo "Applying the DataScienceCluster..." >&2
+  oc apply -f "$m/10-datasciencecluster.yaml" || exit 1
+  wait_for 900 "DataScienceCluster Ready" dsc_ready || {
+    oc get dsc default-dsc -o jsonpath='{range .status.conditions[*]}{.type}{"="}{.status}{" "}{.message}{"\n"}{end}' >&2
+    exit 1
+  }
+fi
 
 echo >&2
 oc get csv -n "$ns"
