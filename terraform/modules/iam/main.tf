@@ -101,3 +101,33 @@ resource "aws_iam_instance_profile" "this" {
   role = each.value.name
   tags = merge(var.tags, { Name = "${var.name_prefix}-${each.key}" })
 }
+
+# Lets the bastion stop this deployment's instances when the cluster has been
+# idle (day2/auto-shutdown/idle-check.sh). Stop only -- no terminate, no start,
+# no tag changes -- and only on instances carrying this project's Project tag
+# (set via the provider's default_tags), so it cannot touch anything else in
+# the account. DescribeInstances has no resource-level scoping in IAM, hence
+# the "*"; it is read-only.
+data "aws_iam_policy_document" "bastion_auto_shutdown" {
+  statement {
+    actions   = ["ec2:DescribeInstances"]
+    resources = ["*"]
+  }
+
+  statement {
+    actions   = ["ec2:StopInstances"]
+    resources = ["arn:aws:ec2:*:*:instance/*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:ResourceTag/Project"
+      values   = ["openshift-sno-ai"]
+    }
+  }
+}
+
+resource "aws_iam_role_policy" "bastion_auto_shutdown" {
+  name   = "${var.name_prefix}-bastion-auto-shutdown"
+  role   = aws_iam_role.this["bastion"].name
+  policy = data.aws_iam_policy_document.bastion_auto_shutdown.json
+}

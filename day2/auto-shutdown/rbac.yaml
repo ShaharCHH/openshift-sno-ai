@@ -1,0 +1,68 @@
+# Read-only identity for the bastion's idle check. The check only ever lists
+# objects and scrapes vLLM metrics; it cannot create, change or delete anything.
+# Known breadth: pods/proxy lets it GET any pod's HTTP port (needed to reach
+# vLLM /metrics from outside the cluster). Its token lives only on the bastion.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: sno-idle-check
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: idle-check
+  namespace: sno-idle-check
+---
+# Long-lived token for the ServiceAccount (the bastion has no way to renew a
+# short-lived one).
+apiVersion: v1
+kind: Secret
+metadata:
+  name: idle-check-token
+  namespace: sno-idle-check
+  annotations:
+    kubernetes.io/service-account.name: idle-check
+type: kubernetes.io/service-account-token
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: sno-idle-check
+rules:
+  - apiGroups: [""]
+    resources: [namespaces, pods, configmaps, persistentvolumeclaims]
+    verbs: [get, list]
+  - apiGroups: [""]
+    resources: [pods/proxy]
+    verbs: [get]
+  - apiGroups: [apps]
+    resources: [deployments, statefulsets]
+    verbs: [list]
+  - apiGroups: [batch]
+    resources: [jobs]
+    verbs: [list]
+  - apiGroups: [route.openshift.io]
+    resources: [routes]
+    verbs: [list]
+  - apiGroups: [serving.kserve.io]
+    resources: [inferenceservices]
+    verbs: [list]
+  - apiGroups: [kubeflow.org]
+    resources: [notebooks]
+    verbs: [list]
+  - apiGroups: [oauth.openshift.io]
+    resources: [oauthaccesstokens]
+    verbs: [list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: sno-idle-check
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: sno-idle-check
+subjects:
+  - kind: ServiceAccount
+    name: idle-check
+    namespace: sno-idle-check
