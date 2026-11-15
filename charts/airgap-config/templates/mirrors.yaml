@@ -1,0 +1,48 @@
+{{- if .Values.mirrors.enabled }}
+{{- /* Open item 3: every upstream gets its own Artifactory path. Reject a mirror path used by two different sources. */ -}}
+{{- $seen := dict }}
+{{- range $set := concat (default (list) .Values.mirrors.digest) (default (list) .Values.mirrors.tag) }}
+{{- if not $set.source }}{{ fail "mirrors: every entry needs a source" }}{{ end }}
+{{- if not $set.mirrors }}{{ fail (printf "mirrors: %s has no mirrors" $set.source) }}{{ end }}
+{{- range $m := $set.mirrors }}
+{{- if and (hasKey $seen $m) (ne (get $seen $m) $set.source) }}
+{{- fail (printf "mirrors: path %s is used by both %s and %s; give each source its own Artifactory path prefix" $m (get $seen $m) $set.source) }}
+{{- end }}
+{{- $_ := set $seen $m $set.source }}
+{{- end }}
+{{- end }}
+{{- if .Values.mirrors.digest }}
+---
+apiVersion: config.openshift.io/v1
+kind: ImageDigestMirrorSet
+metadata:
+  name: {{ .Values.mirrors.digestSetName }}
+  annotations:
+    {{- include "airgap-config.wave" (list $ "mirrors") | nindent 4 }}
+spec:
+  imageDigestMirrors:
+    {{- range .Values.mirrors.digest }}
+    - source: {{ .source }}
+      mirrors:
+        {{- toYaml .mirrors | nindent 8 }}
+      mirrorSourcePolicy: {{ default $.Values.mirrors.sourcePolicy .sourcePolicy }}
+    {{- end }}
+{{- end }}
+{{- if .Values.mirrors.tag }}
+---
+apiVersion: config.openshift.io/v1
+kind: ImageTagMirrorSet
+metadata:
+  name: {{ .Values.mirrors.tagSetName }}
+  annotations:
+    {{- include "airgap-config.wave" (list $ "mirrors") | nindent 4 }}
+spec:
+  imageTagMirrors:
+    {{- range .Values.mirrors.tag }}
+    - source: {{ .source }}
+      mirrors:
+        {{- toYaml .mirrors | nindent 8 }}
+      mirrorSourcePolicy: {{ default $.Values.mirrors.sourcePolicy .sourcePolicy }}
+    {{- end }}
+{{- end }}
+{{- end }}

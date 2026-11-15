@@ -1,0 +1,123 @@
+{{- if .Values.trust.enabled }}
+{{- $t := .Values.trust }}
+{{- $bundle := required "trust.caBundle is required when trust.enabled (supply the PEM from an untracked file: --set-file trust.caBundle=ca.pem)" $t.caBundle }}
+{{- if and $t.s3EndpointCA.pem $t.s3EndpointCA.appendToNetworkBundle }}
+{{- $bundle = printf "%s\n%s" (trim $bundle) (trim $t.s3EndpointCA.pem) }}
+{{- end }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $t.caBundleConfigMapName }}
+  namespace: openshift-config
+  annotations:
+    {{- include "airgap-config.wave" (list $ "trust") | nindent 4 }}
+data:
+  ca-bundle.crt: |
+    {{- $bundle | nindent 4 }}
+{{- if $t.proxy.enabled }}
+---
+# Proxy/cluster already exists; adopt it into the release first (README).
+apiVersion: config.openshift.io/v1
+kind: Proxy
+metadata:
+  name: cluster
+  annotations:
+    {{- include "airgap-config.wave" (list $ "trust") | nindent 4 }}
+spec:
+  {{- with $t.proxy.httpProxy }}
+  httpProxy: {{ . | quote }}
+  {{- end }}
+  {{- with $t.proxy.httpsProxy }}
+  httpsProxy: {{ . | quote }}
+  {{- end }}
+  {{- with $t.proxy.noProxy }}
+  noProxy: {{ . | quote }}
+  {{- end }}
+  trustedCA:
+    name: {{ $t.caBundleConfigMapName }}
+{{- end }}
+{{- if $t.registryCAs }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $t.registryCAConfigMapName }}
+  namespace: openshift-config
+  annotations:
+    {{- include "airgap-config.wave" (list $ "trust") | nindent 4 }}
+data:
+  {{- range $hostPort, $pem := $t.registryCAs }}
+  {{ replace ":" ".." $hostPort | quote }}: |
+    {{- $pem | nindent 4 }}
+  {{- end }}
+---
+# image.config.openshift.io/cluster already exists; adopt it first (README).
+apiVersion: config.openshift.io/v1
+kind: Image
+metadata:
+  name: cluster
+  annotations:
+    {{- include "airgap-config.wave" (list $ "trust") | nindent 4 }}
+spec:
+  additionalTrustedCA:
+    name: {{ $t.registryCAConfigMapName }}
+{{- end }}
+{{- if and $t.s3EndpointCA.pem $t.s3EndpointCA.namespace }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $t.s3EndpointCA.configMapName }}
+  namespace: {{ $t.s3EndpointCA.namespace }}
+  annotations:
+    {{- include "airgap-config.wave" (list $ "trust") | nindent 4 }}
+data:
+  ca.crt: |
+    {{- $t.s3EndpointCA.pem | nindent 4 }}
+{{- end }}
+{{- end }}
+{{- if .Values.issuer.enabled }}
+---
+# TBC (open item 15). Needs the cert-manager CRDs and the CA Secret you created.
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: {{ .Values.issuer.name }}
+  annotations:
+    {{- include "airgap-config.wave" (list $ "issuer") | nindent 4 }}
+spec:
+  ca:
+    secretName: {{ required "issuer.secretName is required when issuer.enabled" .Values.issuer.secretName }}
+{{- end }}
+{{- if or .Values.namedCerts.api.enabled .Values.namedCerts.ingress.enabled }}
+{{- if .Values.namedCerts.api.enabled }}
+---
+apiVersion: config.openshift.io/v1
+kind: APIServer
+metadata:
+  name: cluster
+  annotations:
+    {{- include "airgap-config.wave" (list $ "namedCerts") | nindent 4 }}
+spec:
+  servingCerts:
+    namedCertificates:
+      - names:
+          {{- toYaml (required "namedCerts.api.hostnames is required" .Values.namedCerts.api.hostnames) | nindent 10 }}
+        servingCertificate:
+          name: {{ required "namedCerts.api.secretName is required" .Values.namedCerts.api.secretName }}
+{{- end }}
+{{- if .Values.namedCerts.ingress.enabled }}
+---
+apiVersion: operator.openshift.io/v1
+kind: IngressController
+metadata:
+  name: {{ .Values.namedCerts.ingress.controllerName }}
+  namespace: openshift-ingress-operator
+  annotations:
+    {{- include "airgap-config.wave" (list $ "namedCerts") | nindent 4 }}
+spec:
+  defaultCertificate:
+    name: {{ required "namedCerts.ingress.secretName is required" .Values.namedCerts.ingress.secretName }}
+{{- end }}
+{{- end }}

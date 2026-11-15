@@ -1,0 +1,47 @@
+{{- if .Values.catalogs.enabled }}
+{{- range $i, $s := .Values.catalogs.sources }}
+{{- if not $s.name }}{{ fail (printf "catalogs.sources[%d].name is required" $i) }}{{ end }}
+{{- if not $s.image }}{{ fail (printf "catalogs.sources[%d].image is required (mirrored index image)" $i) }}{{ end }}
+---
+apiVersion: operators.coreos.com/v1alpha1
+kind: CatalogSource
+metadata:
+  name: {{ $s.name }}
+  namespace: {{ $.Values.catalogs.namespace }}
+  annotations:
+    {{- include "airgap-config.wave" (list $ "catalogs") | nindent 4 }}
+spec:
+  sourceType: grpc
+  image: {{ $s.image | quote }}
+  displayName: {{ default $s.name $s.displayName | quote }}
+  publisher: {{ default "site" $s.publisher | quote }}
+  {{- if $s.priority }}
+  priority: {{ $s.priority }}
+  {{- end }}
+  {{- if $s.pullSecrets }}
+  secrets:
+    {{- toYaml $s.pullSecrets | nindent 4 }}
+  {{- end }}
+  {{- if $s.pollInterval }}
+  updateStrategy:
+    registryPoll:
+      interval: {{ $s.pollInterval }}
+  {{- end }}
+{{- end }}
+{{- end }}
+{{- if .Values.operatorHub.enabled }}
+---
+# OperatorHub/cluster already exists; adopt it into the release before the first install (README).
+apiVersion: config.openshift.io/v1
+kind: OperatorHub
+metadata:
+  name: cluster
+  annotations:
+    {{- include "airgap-config.wave" (list $ "operatorHub") | nindent 4 }}
+spec:
+  disableAllDefaultSources: {{ .Values.operatorHub.disableDefaultSources }}
+  {{- if .Values.operatorHub.sources }}
+  sources:
+    {{- toYaml .Values.operatorHub.sources | nindent 4 }}
+  {{- end }}
+{{- end }}

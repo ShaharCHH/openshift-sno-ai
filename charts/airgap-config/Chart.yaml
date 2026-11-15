@@ -1,0 +1,6 @@
+apiVersion: v2
+name: airgap-config
+description: Fusion HCI air-gap layer - mirrored CatalogSources, ImageDigest/TagMirrorSets, OperatorHub default-source switch, cluster CA trust, optional cert-manager CA issuer, named API/ingress certs, Trident StorageClasses (apply BEFORE rhoai-operators).
+type: application
+version: 0.1.0
+appVersion: "ocp-4.20"
