@@ -1,0 +1,50 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: rhoai-config
+  namespace: openshift-gitops
+  annotations:
+    argocd.argoproj.io/sync-wave: "3" # after rhoai-operators (-10); chart-internal waves 3..8 follow
+spec:
+  project: default
+  source:
+    repoURL: https://git.example.internal/REPLACE_ME/openshift-sno-ai.git # PLACEHOLDER
+    targetRevision: main # PLACEHOLDER
+    path: charts/rhoai-config
+    helm:
+      releaseName: rhoai-config
+      valueFiles:
+        - ../values/sno-config.yaml
+      # Helm `lookup` returns EMPTY under Argo CD (it renders with `helm template`), so the chart's
+      # "generate MinIO password once and reuse it" does not work here. Create this Secret yourself
+      # (keys accessKey, secretKey) before the first sync; the chart then does not generate one.
+      # The data connection Secret needs s3.accessKey/secretKey too: supply from an external secret
+      # operator, or keep s3.enabled=false and create the connection Secret yourself.
+      valuesObject:
+        minio:
+          auth:
+            existingSecret: minio-credentials # PLACEHOLDER: a Secret you create (README)
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: default
+  syncPolicy:
+    automated:
+      prune: false
+      selfHeal: false
+    syncOptions:
+      - ServerSideApply=true
+      - SkipDryRunOnMissingResource=true # DSCI/DSC/NFD CRDs only exist after rhoai-operators is healthy
+      - RespectIgnoreDifferences=true
+    retry:
+      limit: 10 # CRDs can lag the Subscription by minutes; Argo does not wait for CSVs
+      backoff: { duration: 1m, factor: 2, maxDuration: 15m }
+  ignoreDifferences:
+    # UNVERIFIED: the operator fills defaults into spec and status of these CRs.
+    - group: datasciencecluster.opendatahub.io
+      kind: DataScienceCluster
+      jsonPointers:
+        - /status
+    - group: dscinitialization.opendatahub.io
+      kind: DSCInitialization
+      jsonPointers:
+        - /status

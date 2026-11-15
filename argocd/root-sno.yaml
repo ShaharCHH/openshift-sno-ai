@@ -1,0 +1,24 @@
+# Root of the app-of-apps for the SNO. Apply with: oc apply -f argocd/root-sno.yaml
+# It only deploys the Application objects under argocd/apps/sno; those deploy the charts.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: rhoai-bundle-root
+  namespace: openshift-gitops
+spec:
+  project: default
+  source:
+    repoURL: https://git.example.internal/REPLACE_ME/openshift-sno-ai.git # PLACEHOLDER
+    targetRevision: main # PLACEHOLDER: branch, tag or SHA
+    path: argocd/apps/sno
+    directory:
+      recurse: false
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: openshift-gitops
+  syncPolicy:
+    automated:
+      prune: false
+      selfHeal: false
+    syncOptions:
+      - ServerSideApply=true

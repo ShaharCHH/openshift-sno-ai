@@ -1,0 +1,48 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: rhoai-config
+  namespace: openshift-gitops
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+spec:
+  project: default
+  source:
+    repoURL: https://git.example.internal/REPLACE_ME/openshift-sno-ai.git # PLACEHOLDER
+    targetRevision: main # PLACEHOLDER: pin a tag or SHA for Fusion
+    path: charts/rhoai-config
+    helm:
+      releaseName: rhoai-config
+      valueFiles:
+        - ../values/fusion-config.yaml
+      # Helm `lookup` is EMPTY under Argo CD: no generated passwords. Reference Secrets you (or an external
+      # secret operator) create before the first sync. Real S3 keys never go in git.
+      # UNVERIFIED: whether fusion-config.yaml renders with s3.enabled=false (the data connection Secret is then
+      # created by your secret operator in the project namespace with the RHOAI connection labels).
+      valuesObject:
+        s3:
+          enabled: false # PLACEHOLDER decision
+        mysql:
+          existingSecret: model-registry-mysql # PLACEHOLDER: Secret with database-password / database-root-password
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: default
+  syncPolicy: # manual
+    syncOptions:
+      - ServerSideApply=true
+      - SkipDryRunOnMissingResource=true # DSC/DSCI/NFD/ClusterPolicy CRDs appear only after rhoai-operators
+      - RespectIgnoreDifferences=true
+  ignoreDifferences:
+    # UNVERIFIED
+    - group: datasciencecluster.opendatahub.io
+      kind: DataScienceCluster
+      jsonPointers:
+        - /status
+    - group: dscinitialization.opendatahub.io
+      kind: DSCInitialization
+      jsonPointers:
+        - /status
+    - group: nvidia.com
+      kind: ClusterPolicy
+      jsonPointers:
+        - /status
