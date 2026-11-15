@@ -1,0 +1,67 @@
+{{- range $key, $op := .Values.operators }}
+{{- if $op.enabled }}
+{{- $cat := default $.Values.catalog $op.catalog }}
+{{- $res := $.Values.resources }}
+{{- if hasKey $op "resources" }}{{ $res = $op.resources }}{{ end }}
+{{- $ns := default $.Values.nodeSelector $op.nodeSelector }}
+{{- $tol := default $.Values.tolerations $op.tolerations }}
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ $op.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: {{ $.Values.syncWaves.namespaces | quote }}
+  {{- with $op.namespaceLabels }}
+  labels:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+---
+apiVersion: operators.coreos.com/v1
+kind: OperatorGroup
+metadata:
+  name: {{ default (printf "%s-group" ($key | kebabcase)) $op.operatorGroupName }}
+  namespace: {{ $op.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: {{ include "rhoai-operators.wave" (list $ $op.wave) | quote }}
+{{- if eq $op.installMode "allNamespaces" }}
+spec: {}
+{{- else }}
+spec:
+  targetNamespaces:
+    - {{ $op.namespace }}
+{{- end }}
+---
+apiVersion: operators.coreos.com/v1alpha1
+kind: Subscription
+metadata:
+  name: {{ $op.package }}
+  namespace: {{ $op.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: {{ include "rhoai-operators.wave" (list $ $op.wave) | quote }}
+spec:
+  channel: {{ $op.channel | quote }}
+  name: {{ $op.package }}
+  source: {{ $cat.source }}
+  sourceNamespace: {{ $cat.sourceNamespace }}
+  installPlanApproval: {{ default $.Values.installPlanApproval $op.installPlanApproval }}
+  {{- with $op.startingCSV }}
+  startingCSV: {{ . }}
+  {{- end }}
+  {{- if or $res $ns $tol }}
+  config:
+    {{- with $res }}
+    resources:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+    {{- with $ns }}
+    nodeSelector:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+    {{- with $tol }}
+    tolerations:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+  {{- end }}
+{{- end }}
+{{- end }}

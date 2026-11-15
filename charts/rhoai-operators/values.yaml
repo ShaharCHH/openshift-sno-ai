@@ -1,0 +1,84 @@
+# Defaults target a connected cluster (OperatorHub catalogs). Overlays live in ../values/.
+
+# Defaults applied to every operator unless the operator overrides them.
+catalog:
+  source: redhat-operators
+  sourceNamespace: openshift-marketplace
+
+installPlanApproval: Automatic
+
+# Optional scheduling/resources applied to every operator's pods (Subscription spec.config).
+# Empty = omit. Per-operator values below replace these (not merged).
+nodeSelector: {}
+tolerations: []
+resources: {}
+
+# Argo CD sync waves: lower runs first. Only used as annotations; harmless under plain helm.
+syncWaves:
+  namespaces: -10
+  prereqs: 0
+  gpu: 1
+  rhoai: 2
+
+operators:
+  certManager:
+    enabled: true
+    namespace: cert-manager-operator
+    package: openshift-cert-manager-operator
+    channel: stable-v1
+    # OperatorGroup mode: ownNamespace | allNamespaces
+    installMode: ownNamespace
+    startingCSV: ""
+    wave: prereqs
+
+  nfd:
+    enabled: true
+    namespace: openshift-nfd
+    package: nfd
+    channel: stable
+    installMode: ownNamespace
+    startingCSV: ""
+    wave: prereqs
+
+  kueue:
+    enabled: true
+    namespace: openshift-kueue-operator
+    package: kueue-operator
+    channel: stable-v1.0 # UNVERIFIED: check `oc get packagemanifest kueue-operator`
+    installMode: ownNamespace
+    startingCSV: ""
+    wave: prereqs
+
+  gpu:
+    enabled: true
+    namespace: nvidia-gpu-operator
+    package: gpu-operator-certified
+    channel: stable # UNVERIFIED: may be a versioned channel such as v25.10
+    installMode: ownNamespace
+    startingCSV: ""
+    wave: gpu
+    # The NVIDIA operator comes from the certified catalog, not redhat-operators.
+    catalog:
+      source: certified-operators
+      sourceNamespace: openshift-marketplace
+
+  rhoai:
+    enabled: true
+    namespace: redhat-ods-operator
+    package: rhods-operator
+    channel: stable-3.x
+    # rhods-operator only supports AllNamespaces.
+    installMode: allNamespaces
+    # Name of the OperatorGroup. Empty = <key>-group. Only one OperatorGroup may exist per
+    # namespace, so on a cluster installed via manifests/rhoai this must match the existing one.
+    operatorGroupName: ""
+    startingCSV: ""
+    wave: rhoai
+    namespaceLabels:
+      openshift.io/cluster-monitoring: "true"
+    # The CSV hard-codes 3 replicas at 500m CPU each; OLM has no replicas knob,
+    # so shrink per-pod requests instead. Set to {} to leave the CSV defaults.
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi

@@ -1,0 +1,19 @@
+apiVersion: operators.coreos.com/v1alpha1
+kind: Subscription
+metadata:
+  name: rhods-operator
+  namespace: redhat-ods-operator
+spec:
+  channel: stable-3.x
+  name: rhods-operator
+  source: redhat-operators
+  sourceNamespace: openshift-marketplace
+  installPlanApproval: Automatic
+  # The CSV hard-codes 3 replicas at 500m CPU each (1.5 CPU reserved, only one
+  # is the active leader). On a single 8-vCPU node that is too much, and OLM has
+  # no replicas knob, so shrink the per-pod requests instead.
+  config:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi

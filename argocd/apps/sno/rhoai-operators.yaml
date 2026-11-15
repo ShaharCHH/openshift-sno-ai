@@ -1,0 +1,39 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: rhoai-operators
+  namespace: openshift-gitops
+  annotations:
+    argocd.argoproj.io/sync-wave: "-10" # app-level order inside the root; resource waves inside the chart still apply
+  # No resources-finalizer on purpose: deleting this Application must NOT cascade-delete operators.
+spec:
+  project: default
+  source:
+    repoURL: https://git.example.internal/REPLACE_ME/openshift-sno-ai.git # PLACEHOLDER
+    targetRevision: main # PLACEHOLDER
+    path: charts/rhoai-operators
+    helm:
+      releaseName: rhoai-operators
+      valueFiles:
+        - ../values/sno.yaml # relative to `path`
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: default # only used for helm's release namespace; the objects set their own
+  syncPolicy:
+    automated:
+      prune: false
+      selfHeal: false
+    syncOptions:
+      - ServerSideApply=true # also lets Argo take over objects created by hand (see README, adoption)
+      - SkipDryRunOnMissingResource=true # CRs whose CRD does not exist yet do not fail the dry run
+      - RespectIgnoreDifferences=true
+    retry:
+      limit: 5
+      backoff: { duration: 30s, factor: 2, maxDuration: 10m }
+  ignoreDifferences:
+    # UNVERIFIED: which fields OLM/operators rewrite. Remove an entry if it turns out not to be needed.
+    - group: operators.coreos.com
+      kind: Subscription
+      jsonPointers:
+        - /status
+        - /spec/config # UNVERIFIED: only if RHOAI/OLM mutates it. Costs you drift detection on resource trims.

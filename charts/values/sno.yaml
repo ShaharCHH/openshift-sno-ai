@@ -1,0 +1,18 @@
+# SNO (OCP 4.22, connected, CPU only). RHOAI 3.5.x is what is installed today.
+catalog:
+  source: redhat-operators
+  sourceNamespace: openshift-marketplace
+
+operators:
+  # No GPU on the SNO (g5 capacity refused); keep the GPU operator off until a GPU node exists.
+  gpu:
+    enabled: false
+  rhoai:
+    channel: stable-3.x
+    # Matches manifests/rhoai/01-operatorgroup.yaml so Helm adopts it instead of creating a 2nd group.
+    operatorGroupName: rhods-operator-group
+    # Trim to fit an 8 vCPU node (matches manifests/rhoai/02-subscription.yaml).
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi

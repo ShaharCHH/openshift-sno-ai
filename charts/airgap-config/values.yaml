@@ -1,0 +1,124 @@
+# Generic defaults: everything OFF, nothing site-specific. Overlay: ../values/fusion-airgap.yaml.
+# Apply this chart BEFORE rhoai-operators (its CatalogSources and mirrors are what the Subscriptions resolve from).
+# Every kind/field marked UNVERIFIED could not be checked offline against OCP 4.20.
+
+# Argo CD sync waves; they run before the operators chart (-10 .. 2). `issuer` needs the cert-manager CRD,
+# so it is after the operators chart (see README: with plain Helm it is a second `helm upgrade`).
+syncWaves:
+  trust: -30
+  operatorHub: -28
+  mirrors: -26
+  catalogs: -24
+  storage: -22
+  namedCerts: -20
+  issuer: 3
+
+# --- Mirrored operator catalogs -------------------------------------------------------------------------------
+# One CatalogSource per mirrored index (built by oc-mirror). Names and image paths come only from here.
+# oc-mirror also generates cs-*.yaml / idms-*.yaml files; copying their content into these values is the safest source.
+catalogs:
+  enabled: false
+  namespace: openshift-marketplace
+  sources: []
+  #  - name: mirror-redhat-operators
+  #    image: registry.example.internal/<prefix>/redhat/redhat-operator-index:v4.20   # UNVERIFIED path
+  #    displayName: Mirror Red Hat Operators
+  #    publisher: Site
+  #    pollInterval: ""            # e.g. 30m for a moving tag; empty for a digest/versioned tag
+  #    pullSecrets: []             # Secrets that already exist in `namespace`
+  #    priority: -100              # optional
+
+# Disable the built-in Red Hat sources (they point at registry.redhat.io, unreachable when air-gapped).
+# OperatorHub/cluster already exists on every cluster: Helm needs to adopt it first (README).
+operatorHub:
+  enabled: false
+  disableDefaultSources: true
+  sources: [] # optional per-source overrides: [{name: redhat-operators, disabled: true}]
+
+# --- Image mirroring (open item 3) ----------------------------------------------------------------------------
+# IDMS = pulls by digest (@sha256:...), ITMS = pulls by tag. Each entry needs its OWN mirror path on Artifactory
+# (a distinct path prefix per upstream registry/repository). The render FAILS if two different sources share a mirror path.
+# CHANGING THESE makes the Machine Config Operator rewrite /etc/containers/registries.conf on nodes;
+# whether that reboots or drains nodes on 4.20 is UNVERIFIED: apply in a maintenance window.
+mirrors:
+  enabled: false
+  digestSetName: airgap-digest-mirrors
+  tagSetName: airgap-tag-mirrors
+  # NeverContactSource (air-gap: never fall back to the public registry) | AllowContactingSource
+  sourcePolicy: NeverContactSource
+  digest: []
+  tag: []
+  #  - source: registry.redhat.io
+  #    mirrors: [artifactory.example.internal/rh-registry-redhat-io]    # UNVERIFIED site path
+  #  - source: quay.io
+  #    mirrors: [artifactory.example.internal/rh-registry-quay-io]
+  #  - source: nvcr.io
+  #    mirrors: [artifactory.example.internal/rh-registry-nvcr-io]
+
+# --- Cluster trust --------------------------------------------------------------------------------------------
+# PEM text is supplied from an UNTRACKED values file or --set-file; never commit it.
+trust:
+  enabled: false
+  # Network (corporate) CA bundle -> ConfigMap in openshift-config, referenced by the cluster Proxy.
+  caBundle: ""
+  caBundleConfigMapName: network-ca-bundle
+  # Proxy/cluster. It exists already: adopt it first (README). httpProxy etc. are optional (empty = not rendered).
+  proxy:
+    enabled: true
+    httpProxy: ""
+    httpsProxy: ""
+    noProxy: ""
+  # image.config.openshift.io/cluster additionalTrustedCA: registry "host:port" -> PEM (one ConfigMap in openshift-config).
+  # Keys are rendered with ":" replaced by ".." as OpenShift requires. Needed for the Artifactory registry's CA.
+  registryCAs: {}
+  #  "artifactory.example.internal:443": |
+  #    -----BEGIN CERTIFICATE----- ...
+  registryCAConfigMapName: registry-cas
+  # CA of the S3 endpoint (StorageGRID / ONTAP S3). Rendered as its own ConfigMap in s3EndpointCA.namespace
+  # and, with appendToNetworkBundle, also appended to the Proxy bundle. For RHOAI pods also put it in
+  # rhoai-config `dsci.spec.trustedCABundle.customCABundle`. UNVERIFIED: which consumers read which of the two.
+  s3EndpointCA:
+    pem: ""
+    configMapName: s3-endpoint-ca
+    namespace: "" # empty = no standalone ConfigMap
+    appendToNetworkBundle: true
+
+# Optional cert-manager CA ClusterIssuer against the network CA. TBC (architecture open item 15): not decided
+# whether the cluster issues certs from the corporate CA. The CA keypair Secret is created by you, never here.
+# Needs the cert-manager CRDs: enable only AFTER rhoai-operators is healthy.
+issuer:
+  enabled: false
+  name: network-ca
+  secretName: "" # Secret (tls.crt, tls.key) in the cert-manager namespace, supplied by you
+  # UNVERIFIED: the Red Hat cert-manager operator keeps the cluster-resource namespace here.
+  secretNamespace: cert-manager
+
+# Named serving certificates. Secrets (kubernetes.io/tls) are created by you and never committed.
+# Both target singleton objects that already exist (APIServer/cluster, IngressController/default): adopt first.
+namedCerts:
+  api:
+    enabled: false
+    hostnames: [] # e.g. [api.fusion.example.internal]
+    secretName: "" # kubernetes.io/tls Secret in openshift-config
+  ingress:
+    enabled: false
+    controllerName: default
+    secretName: "" # kubernetes.io/tls Secret in openshift-ingress
+
+# --- Storage (NetApp Trident) -----------------------------------------------------------------------------------
+# Only the StorageClass objects. Trident itself and its backend CRs (TridentBackendConfig, Secrets, credentials) are
+# OUT OF SCOPE: they belong to the storage team / Fusion data layer. Without a working backend these classes bind nothing.
+storage:
+  enabled: false
+  defaultClassName: "" # the class that gets is-default-class=true. Un-default the old default yourself (README).
+  classes: []
+  #  - name: trident-nfs
+  #    backendType: ontap-nas        # UNVERIFIED parameter name/value per Trident docs
+  #    parameters: {}                # extra provisioner parameters
+  #    mountOptions: []
+  #  - name: trident-iscsi
+  #    backendType: ontap-san
+  provisioner: csi.trident.netapp.io # UNVERIFIED for this site
+  reclaimPolicy: Delete
+  allowVolumeExpansion: true
+  volumeBindingMode: Immediate

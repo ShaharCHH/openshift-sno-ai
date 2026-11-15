@@ -1,0 +1,60 @@
+# rhoai-config on Fusion HCI (air-gap, RHOAI 3.4, H200). Everything site-specific is UNVERIFIED until
+# checked on the cluster. External S3 (StorageGRID / ONTAP S3), no MinIO.
+dsc:
+  apiVersion: datasciencecluster.opendatahub.io/v2 # UNVERIFIED: 3.4 may still serve v1 only
+  components:
+    dashboard: { managementState: Managed }
+    workbenches: { managementState: Managed }
+    kserve: { managementState: Managed }
+    aipipelines: { managementState: Managed }
+    modelregistry: { managementState: Managed }
+    kueue: { managementState: Managed }
+
+dsci:
+  spec:
+    applicationsNamespace: redhat-ods-applications
+    monitoring:
+      managementState: Managed
+      namespace: redhat-ods-monitoring
+    trustedCABundle:
+      managementState: Managed
+      # Air-gap: the same corporate CA bundle (plus the S3 endpoint CA) as airgap-config `trust.caBundle`,
+      # from an untracked values file (--set-file dsci.spec.trustedCABundle.customCABundle=ca.pem).
+      customCABundle: ""
+
+project:
+  name: rhoai-prod # UNVERIFIED: site naming
+
+minio:
+  enabled: false
+
+s3:
+  endpoint: https://s3.example.internal # UNVERIFIED placeholder: StorageGRID / ONTAP S3 endpoint
+  bucket: models
+  # Supply the keys from an untracked values file, or set s3.enabled=false and manage the Secret externally.
+  accessKey: ""
+  secretKey: ""
+
+# Storage plan (classes themselves come from charts/airgap-config, values/fusion-airgap.yaml; Trident backends are out of scope):
+#   trident-nfs   = cluster default class -> workbench PVCs and model PVCs (RWX-capable) take it implicitly
+#   trident-iscsi = MySQL (model registry), set explicitly below
+mysql:
+  enabled: true
+  image: registry.example.internal/rhel9/mysql-80:latest # UNVERIFIED: mirrored image
+  storageClass: trident-iscsi # UNVERIFIED: site StorageClass name; must match airgap-config storage.classes
+  # Set to an externally managed Secret to avoid lookup-generated passwords under Argo CD.
+  existingSecret: ""
+
+serving:
+  enabled: false
+
+# GPU / MIG (render-only until real MIG hardware exists). Profile names for H200 are UNVERIFIED.
+gpu:
+  enabled: true
+  repository: "" # UNVERIFIED: mirror path, e.g. registry.example.internal/nvidia
+  imagePullSecrets: []
+  mig:
+    strategy: mixed # MIG vs time-slicing vs whole-GPU is open item 8; this is the MIG candidate
+  nodes: []
+  kueue:
+    enabled: true

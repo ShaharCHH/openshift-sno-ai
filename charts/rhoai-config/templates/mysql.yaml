@@ -1,0 +1,94 @@
+{{- if .Values.mysql.enabled }}
+{{- $ns := default .Values.project.name .Values.mysql.namespace }}
+{{- $secretName := default "model-registry-mysql" .Values.mysql.existingSecret }}
+{{- if not .Values.mysql.existingSecret }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $secretName }}
+  namespace: {{ $ns }}
+  annotations:
+    {{- include "rhoai-config.wave" (list . "storage") | nindent 4 }}
+type: Opaque
+stringData:
+  database-user: {{ .Values.mysql.user | quote }}
+  database-name: {{ .Values.mysql.database | quote }}
+  database-password: {{ include "rhoai-config.cred" (list . $secretName "database-password" .Values.mysql.password 24 $ns) | quote }}
+  database-root-password: {{ include "rhoai-config.cred" (list . $secretName "database-root-password" "" 24 $ns) | quote }}
+---
+{{- end }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: model-registry-mysql
+  namespace: {{ $ns }}
+  annotations:
+    {{- include "rhoai-config.wave" (list . "storage") | nindent 4 }}
+spec:
+  accessModes: [ReadWriteOnce]
+  {{- with .Values.mysql.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.mysql.size }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: model-registry-mysql
+  namespace: {{ $ns }}
+  annotations:
+    {{- include "rhoai-config.wave" (list . "storage") | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: model-registry-mysql
+  template:
+    metadata:
+      labels:
+        app: model-registry-mysql
+    spec:
+      containers:
+        - name: mysql
+          image: {{ .Values.mysql.image }}
+          env:
+            - name: MYSQL_USER
+              valueFrom: { secretKeyRef: { name: {{ $secretName }}, key: database-user } }
+            - name: MYSQL_PASSWORD
+              valueFrom: { secretKeyRef: { name: {{ $secretName }}, key: database-password } }
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom: { secretKeyRef: { name: {{ $secretName }}, key: database-root-password } }
+            - name: MYSQL_DATABASE
+              valueFrom: { secretKeyRef: { name: {{ $secretName }}, key: database-name } }
+          ports:
+            - { name: mysql, containerPort: 3306 }
+          readinessProbe:
+            exec:
+              command: ["/bin/sh", "-c", "MYSQL_PWD=\"$MYSQL_PASSWORD\" mysqladmin -u\"$MYSQL_USER\" ping"]
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.mysql.resources | nindent 12 }}
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/mysql/data }
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: model-registry-mysql
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: model-registry-mysql
+  namespace: {{ $ns }}
+  annotations:
+    {{- include "rhoai-config.wave" (list . "storage") | nindent 4 }}
+spec:
+  selector:
+    app: model-registry-mysql
+  ports:
+    - { name: mysql, port: 3306, targetPort: mysql }
+{{- end }}

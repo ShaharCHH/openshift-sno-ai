@@ -4,4 +4,4 @@
 *.tfstate
 *.tfstate.*
 .terraform/
-SESSION_STATE.md
+HANDOFF.md

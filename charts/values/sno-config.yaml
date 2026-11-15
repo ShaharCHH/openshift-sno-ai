@@ -1,0 +1,27 @@
+# rhoai-config on the SNO: CPU only, MinIO on LVMS, minimal DSC (same as manifests/rhoai/10-datasciencecluster.yaml).
+# Apply: helm upgrade --install rhoai-config charts/rhoai-config -f charts/values/sno-config.yaml
+# The chart defaults already set dashboard/workbenches/kserve Managed and everything else Removed.
+project:
+  name: rhoai-poc
+
+minio:
+  enabled: true
+  storageClass: lvms-vg1
+  size: 10Gi
+  # Credentials are generated on first install and reused on upgrade. To pin them, pass
+  # minio.auth.accessKey / minio.auth.secretKey with --set (never commit them).
+
+s3:
+  bucket: models
+
+mysql:
+  enabled: false
+
+# Enable once the model is uploaded and the runtime image is known (see charts/README.md):
+#   --set serving.enabled=true --set serving.runtime.image=<image from the shipped template>
+serving:
+  enabled: false
+
+# No GPU on the SNO: GPU Operator instance / MIG not rendered.
+gpu:
+  enabled: false

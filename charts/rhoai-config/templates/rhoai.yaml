@@ -1,0 +1,27 @@
+{{- if .Values.dsci.enabled }}
+apiVersion: dscinitialization.opendatahub.io/v2 # UNVERIFIED apiVersion on RHOAI 3.4; 3.5 per the live cluster
+kind: DSCInitialization
+metadata:
+  name: {{ .Values.dsci.name }}
+  annotations:
+    {{- include "rhoai-config.wave" (list . "dsci") | nindent 4 }}
+spec:
+  {{- toYaml .Values.dsci.spec | nindent 2 }}
+{{- end }}
+{{- if .Values.dsc.enabled }}
+---
+apiVersion: {{ .Values.dsc.apiVersion }}
+kind: DataScienceCluster
+metadata:
+  name: {{ .Values.dsc.name }}
+  annotations:
+    {{- include "rhoai-config.wave" (list . "dsc") | nindent 4 }}
+spec:
+  components:
+    {{- range $name, $c := .Values.dsc.components }}
+    {{- if $c }}
+    {{ $name }}:
+      {{- toYaml $c | nindent 6 }}
+    {{- end }}
+    {{- end }}
+{{- end }}

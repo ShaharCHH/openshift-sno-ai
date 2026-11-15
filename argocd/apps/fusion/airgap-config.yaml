@@ -1,0 +1,44 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: airgap-config
+  namespace: openshift-gitops
+  annotations:
+    argocd.argoproj.io/sync-wave: "-30" # first: catalogs, mirrors, CA trust, storage classes
+spec:
+  project: default
+  source:
+    repoURL: https://git.example.internal/REPLACE_ME/openshift-sno-ai.git # PLACEHOLDER
+    targetRevision: main # PLACEHOLDER: pin a tag or SHA for Fusion
+    path: charts/airgap-config
+    helm:
+      releaseName: airgap-config
+      valueFiles:
+        - ../values/fusion-airgap.yaml
+      # PEM text (trust.caBundle etc.) must NOT be committed. Options: a private values repo (Argo multiple
+      # sources, `$values` ref), or an external-secrets/ConfigMap generator. PLACEHOLDER until decided:
+      parameters:
+        - name: trust.caBundle
+          value: REPLACE_ME # PLACEHOLDER: render fails/dummy until a real source is wired
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: default
+  syncPolicy: # manual: changing mirror sets / Proxy CA makes the Machine Config Operator update nodes
+    syncOptions:
+      - ServerSideApply=true # also the safer way to take over the singletons (OperatorHub, Proxy, Image, APIServer, IngressController)
+      - SkipDryRunOnMissingResource=true
+      - RespectIgnoreDifferences=true
+  ignoreDifferences:
+    # UNVERIFIED: the cluster/operators add defaults to these singletons.
+    - group: config.openshift.io
+      kind: OperatorHub
+      jsonPointers:
+        - /status
+    - group: config.openshift.io
+      kind: Proxy
+      jsonPointers:
+        - /status
+    - group: config.openshift.io
+      kind: Image
+      jsonPointers:
+        - /status

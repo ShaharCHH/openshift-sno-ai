@@ -1,0 +1,28 @@
+{{- if .Values.storage.enabled }}
+{{- range $i, $c := .Values.storage.classes }}
+{{- if not $c.name }}{{ fail (printf "storage.classes[%d].name is required" $i) }}{{ end }}
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: {{ $c.name }}
+  annotations:
+    {{- include "airgap-config.wave" (list $ "storage") | nindent 4 }}
+    {{- if eq $c.name $.Values.storage.defaultClassName }}
+    storageclass.kubernetes.io/is-default-class: "true"
+    {{- end }}
+provisioner: {{ $.Values.storage.provisioner }}
+reclaimPolicy: {{ $.Values.storage.reclaimPolicy }}
+allowVolumeExpansion: {{ $.Values.storage.allowVolumeExpansion }}
+volumeBindingMode: {{ $.Values.storage.volumeBindingMode }}
+parameters:
+  backendType: {{ required (printf "storage.classes[%d].backendType is required" $i) $c.backendType | quote }}
+  {{- range $k, $v := $c.parameters }}
+  {{ $k }}: {{ $v | quote }}
+  {{- end }}
+{{- if $c.mountOptions }}
+mountOptions:
+  {{- toYaml $c.mountOptions | nindent 2 }}
+{{- end }}
+{{- end }}
+{{- end }}

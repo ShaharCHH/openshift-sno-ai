@@ -1,0 +1,21 @@
+# Root of the app-of-apps for Fusion (prod-like): NO automated sync. Every sync is a human click/CLI call.
+# Apply with: oc apply -f argocd/root-fusion.yaml, then `argocd app sync rhoai-bundle-root`.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: rhoai-bundle-root
+  namespace: openshift-gitops
+spec:
+  project: default
+  source:
+    repoURL: https://git.example.internal/REPLACE_ME/openshift-sno-ai.git # PLACEHOLDER
+    targetRevision: main # PLACEHOLDER: pin a tag or SHA for Fusion
+    path: argocd/apps/fusion
+    directory:
+      recurse: false
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: openshift-gitops
+  syncPolicy:
+    syncOptions:
+      - ServerSideApply=true

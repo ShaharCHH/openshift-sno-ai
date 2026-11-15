@@ -1,0 +1,114 @@
+{{- if .Values.gpu.enabled }}
+{{- $g := .Values.gpu }}
+{{- /*
+Helm should not own Node objects (the kubelet and machine-api write them), so node labels/taints are
+rendered as a ConfigMap holding a reviewed command list that YOU run. Nothing here touches a node.
+*/}}
+{{- if $g.nodes }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gpu-node-plan
+  namespace: {{ $g.namespace }}
+  annotations:
+    {{- include "rhoai-config.wave" (list . "gpu") | nindent 4 }}
+data:
+  apply.sh: |
+    #!/usr/bin/env bash
+    # Rendered from gpu.nodes. Review, then run on a machine connected to the right cluster.
+    # WARNING: a changed nvidia.com/mig.config makes MIG Manager evict GPU pods and may reboot the node.
+    set -euo pipefail
+    {{- range $g.nodes }}
+    {{- $n := . }}
+    oc label node {{ $n.name }} --overwrite nvidia.com/mig.config={{ $n.migConfig | default "all-disabled" }}
+    {{- range $k, $v := $n.labels }}
+    oc label node {{ $n.name }} --overwrite {{ $k }}={{ $v }}
+    {{- end }}
+    {{- if $g.taint.enabled }}
+    oc adm taint node {{ $n.name }} --overwrite {{ $g.taint.key }}={{ $g.taint.value }}:{{ $g.taint.effect }}
+    {{- end }}
+    {{- end }}
+{{- end }}
+{{- /* Kueue: whole-GPU vs MIG-slice quota. */}}
+{{- if $g.kueue.enabled }}
+{{- $q := $g.kueue }}
+---
+# UNVERIFIED: kueue.x-k8s.io API version in the Red Hat build of Kueue (v1beta1 here).
+apiVersion: kueue.x-k8s.io/v1beta1
+kind: ResourceFlavor
+metadata:
+  name: gpu-whole
+  annotations:
+    {{- include "rhoai-config.wave" (list . "gpuQueues") | nindent 4 }}
+spec:
+  nodeLabels:
+    {{- toYaml $q.wholeNodeLabels | nindent 4 }}
+  {{- if $g.taint.enabled }}
+  tolerations:
+    - key: {{ $g.taint.key }}
+      operator: Exists
+      effect: {{ $g.taint.effect }}
+  {{- end }}
+---
+apiVersion: kueue.x-k8s.io/v1beta1
+kind: ResourceFlavor
+metadata:
+  name: gpu-mig
+  annotations:
+    {{- include "rhoai-config.wave" (list . "gpuQueues") | nindent 4 }}
+spec:
+  nodeLabels:
+    {{- toYaml $q.migNodeLabels | nindent 4 }}
+  {{- if $g.taint.enabled }}
+  tolerations:
+    - key: {{ $g.taint.key }}
+      operator: Exists
+      effect: {{ $g.taint.effect }}
+  {{- end }}
+---
+apiVersion: kueue.x-k8s.io/v1beta1
+kind: ClusterQueue
+metadata:
+  name: {{ $q.clusterQueue.name }}
+  annotations:
+    {{- include "rhoai-config.wave" (list . "gpuQueues") | nindent 4 }}
+spec:
+  namespaceSelector: {}
+  # A resource may appear in only one resourceGroup, hence one group each for cpu/memory, whole GPUs and MIG slices.
+  resourceGroups:
+    - coveredResources: [cpu, memory]
+      flavors:
+        - name: gpu-whole
+          resources:
+            - { name: cpu, nominalQuota: {{ $q.clusterQueue.cpu | quote }} }
+            - { name: memory, nominalQuota: {{ $q.clusterQueue.memory | quote }} }
+    - coveredResources: [nvidia.com/gpu]
+      flavors:
+        - name: gpu-whole
+          resources:
+            - { name: nvidia.com/gpu, nominalQuota: {{ $q.clusterQueue.wholeGpus }} }
+    {{- if $q.clusterQueue.migSlices }}
+    - coveredResources:
+        {{- range $k, $_ := $q.clusterQueue.migSlices }}
+        - nvidia.com/mig-{{ $k }}
+        {{- end }}
+      flavors:
+        - name: gpu-mig
+          resources:
+            {{- range $k, $v := $q.clusterQueue.migSlices }}
+            - { name: nvidia.com/mig-{{ $k }}, nominalQuota: {{ $v }} }
+            {{- end }}
+    {{- end }}
+---
+apiVersion: kueue.x-k8s.io/v1beta1
+kind: LocalQueue
+metadata:
+  name: {{ $q.localQueue.name }}
+  namespace: {{ $q.localQueue.namespace | default .Values.project.name }}
+  annotations:
+    {{- include "rhoai-config.wave" (list . "gpuQueues") | nindent 4 }}
+spec:
+  clusterQueue: {{ $q.clusterQueue.name }}
+{{- end }}
+{{- end }}

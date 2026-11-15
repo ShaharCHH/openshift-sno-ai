@@ -1,0 +1,6 @@
+apiVersion: v2
+name: rhoai-config
+description: OpenShift AI operator instances and CPU PoC pieces - NFD, DSCI, DSC, MinIO, data connection, optional MySQL and a tiny model (wave 3+ of the bundle; apply after rhoai-operators).
+type: application
+version: 0.1.0
+appVersion: "rhoai-3.x"

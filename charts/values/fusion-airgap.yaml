@@ -1,0 +1,64 @@
+# airgap-config on Fusion HCI (OCP 4.20, air-gapped). Apply BEFORE rhoai-operators.
+# All registry hosts and Artifactory paths are placeholders (UNVERIFIED site values); no secrets, no PEM here.
+# Supply PEM from an untracked file:  --set-file trust.caBundle=... --set-file trust.s3EndpointCA.pem=...
+
+catalogs:
+  enabled: true
+  sources:
+    # Names must match catalog.source / operators.gpu.catalog.source in values/fusion.yaml.
+    - name: mirror-redhat-operators
+      image: artifactory.example.internal/rh-registry-redhat-io/redhat/redhat-operator-index:v4.20 # UNVERIFIED path/tag
+      displayName: Mirror Red Hat Operators
+    - name: mirror-certified-operators
+      image: artifactory.example.internal/rh-registry-redhat-io/redhat/certified-operator-index:v4.20 # UNVERIFIED path/tag
+      displayName: Mirror Certified Operators
+
+operatorHub:
+  enabled: true
+  disableDefaultSources: true
+
+# Open item 3: one distinct Artifactory path per upstream. Mirror paths below are examples; the render fails on a clash.
+mirrors:
+  enabled: true
+  digest:
+    - source: registry.redhat.io
+      mirrors: [artifactory.example.internal/rh-registry-redhat-io] # UNVERIFIED
+    - source: registry.access.redhat.com
+      mirrors: [artifactory.example.internal/rh-registry-access-redhat-com] # UNVERIFIED
+    - source: quay.io
+      mirrors: [artifactory.example.internal/rh-registry-quay-io] # UNVERIFIED
+    - source: nvcr.io
+      mirrors: [artifactory.example.internal/rh-registry-nvcr-io] # UNVERIFIED
+  tag:
+    # Images the GPU Operator pulls by tag. Same distinct paths as above.
+    - source: nvcr.io
+      mirrors: [artifactory.example.internal/rh-registry-nvcr-io] # UNVERIFIED
+    - source: quay.io
+      mirrors: [artifactory.example.internal/rh-registry-quay-io]
+
+trust:
+  enabled: true
+  caBundle: "" # REQUIRED at render: --set-file trust.caBundle=<network-ca.pem>
+  proxy:
+    enabled: true
+    # httpProxy/httpsProxy/noProxy only if the site uses a proxy (UNVERIFIED); empty = not rendered
+  registryCAs: {} # UNVERIFIED: add "artifactory.example.internal:443" via an untracked file if Artifactory uses a private CA
+  s3EndpointCA:
+    namespace: rhoai-prod # same as project.name in values/fusion-config.yaml; empty pem = nothing rendered
+
+issuer:
+  enabled: false # TBC open item 15; enable only after rhoai-operators (needs cert-manager CRDs) and set issuer.secretName
+
+namedCerts: # optional; Secrets are created by you
+  api: { enabled: false }
+  ingress: { enabled: false }
+
+# Storage defaults (Trident). Backend CRs out of scope. Class names are UNVERIFIED site choices.
+storage:
+  enabled: true
+  defaultClassName: trident-nfs # workbench and model PVCs use the default class
+  classes:
+    - name: trident-nfs
+      backendType: ontap-nas # UNVERIFIED
+    - name: trident-iscsi # MySQL (model registry)
+      backendType: ontap-san # UNVERIFIED

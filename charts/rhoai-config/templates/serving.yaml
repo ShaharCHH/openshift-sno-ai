@@ -1,0 +1,56 @@
+{{- if .Values.serving.enabled }}
+{{- $ns := .Values.project.name }}
+{{- $img := required "serving.runtime.image is required when serving.enabled (copy it from the runtime template RHOAI ships; see values.yaml)" .Values.serving.runtime.image }}
+apiVersion: serving.kserve.io/v1alpha1
+kind: ServingRuntime
+metadata:
+  name: {{ .Values.serving.runtime.name }}
+  namespace: {{ $ns }}
+  labels:
+    opendatahub.io/dashboard: "true"
+  annotations:
+    openshift.io/display-name: {{ .Values.serving.runtime.displayName | quote }}
+    {{- include "rhoai-config.wave" (list . "serving") | nindent 4 }}
+spec:
+  # UNVERIFIED: shape written from memory of the RHOAI OpenVINO template; diff against the shipped template.
+  multiModel: false
+  supportedModelFormats:
+    - { name: onnx, version: "1", autoSelect: true }
+    - { name: openvino_ir, version: opset13, autoSelect: true }
+  containers:
+    - name: kserve-container
+      image: {{ $img | quote }}
+      args:
+        - --model_name={{ "{{.Name}}" }}
+        - --port=8001
+        - --rest_port=8888
+        - --model_path=/mnt/models
+        - --file_system_poll_wait_seconds=0
+        - --target_device=CPU
+      ports:
+        - { containerPort: 8888, protocol: TCP }
+      resources:
+        requests: { cpu: {{ .Values.serving.runtime.cpu.request | quote }}, memory: {{ .Values.serving.runtime.memory.request | quote }} }
+        limits: { cpu: {{ .Values.serving.runtime.cpu.limit | quote }}, memory: {{ .Values.serving.runtime.memory.limit | quote }} }
+---
+apiVersion: serving.kserve.io/v1beta1
+kind: InferenceService
+metadata:
+  name: {{ .Values.serving.model.name }}
+  namespace: {{ $ns }}
+  labels:
+    opendatahub.io/dashboard: "true"
+  annotations:
+    serving.kserve.io/deploymentMode: {{ .Values.serving.deploymentMode }}
+    {{- include "rhoai-config.wave" (list . "serving") | nindent 4 }}
+spec:
+  predictor:
+    model:
+      modelFormat:
+        name: {{ .Values.serving.model.format }}
+        version: {{ .Values.serving.model.formatVersion | quote }}
+      runtime: {{ .Values.serving.runtime.name }}
+      storage: # UNVERIFIED: `storage.key/path` form; older RHOAI used storageUri plus a storage-key annotation
+        key: {{ .Values.s3.name }}
+        path: {{ .Values.serving.model.path }}
+{{- end }}

@@ -1,0 +1,31 @@
+# Optional: installs the OpenShift GitOps operator (Argo CD). Apply ONCE by hand, before the root Application.
+# Kept out of charts/rhoai-operators on purpose: Argo cannot install itself (the chart is deployed BY Argo),
+# and a chart-managed Subscription for Argo would be pruned/reverted by the Argo it installs.
+# All values UNVERIFIED offline: check `oc get packagemanifest openshift-gitops-operator -n openshift-marketplace`.
+# Fusion (air-gap): set `source` to your mirrored catalog name from charts/values/fusion-airgap.yaml.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: openshift-gitops-operator
+  labels:
+    openshift.io/cluster-monitoring: "true"
+---
+apiVersion: operators.coreos.com/v1
+kind: OperatorGroup
+metadata:
+  name: openshift-gitops-operator
+  namespace: openshift-gitops-operator
+spec:
+  upgradeStrategy: Default # UNVERIFIED: AllNamespaces mode = no targetNamespaces
+---
+apiVersion: operators.coreos.com/v1alpha1
+kind: Subscription
+metadata:
+  name: openshift-gitops-operator
+  namespace: openshift-gitops-operator
+spec:
+  channel: latest # UNVERIFIED channel name
+  name: openshift-gitops-operator
+  source: redhat-operators # Fusion: your mirror catalog
+  sourceNamespace: openshift-marketplace
+  installPlanApproval: Automatic
