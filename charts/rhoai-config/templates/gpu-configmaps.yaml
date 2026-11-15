@@ -1,0 +1,69 @@
+{{- if .Values.gpu.enabled }}
+{{- $g := .Values.gpu }}
+{{- $ns := $g.namespace }}
+{{- /* Custom mig-parted config. MIG Manager reads key config.yaml (name fixed by the GPU Operator docs). */}}
+{{- if ne $g.mig.strategy "none" }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $g.mig.configMapName }}
+  namespace: {{ $ns }}
+  annotations:
+    {{- include "rhoai-config.wave" (list . "gpu") | nindent 4 }}
+data:
+  config.yaml: |
+    version: v1
+    mig-configs:
+      {{- toYaml $g.mig.profiles | nindent 6 }}
+{{- end }}
+{{- /* Time-slicing option (device plugin sharing config). Mutually exclusive with MIG here. */}}
+{{- if $g.timeSlicing.enabled }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $g.timeSlicing.configMapName }}
+  namespace: {{ $ns }}
+  annotations:
+    {{- include "rhoai-config.wave" (list . "gpu") | nindent 4 }}
+data:
+  {{ $g.timeSlicing.default }}: |
+    version: v1
+    flags:
+      migStrategy: none
+    sharing:
+      timeSlicing:
+        renameByDefault: {{ $g.timeSlicing.renameByDefault }}
+        resources:
+          - name: nvidia.com/gpu
+            replicas: {{ $g.timeSlicing.replicas }}
+{{- end }}
+{{- /* Air-gap: driver package repo + corporate CA, mounted into the driver pod by the operator. */}}
+{{- with $g.driver.repoConfig }}
+{{- if .data }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .configMapName }}
+  namespace: {{ $ns }}
+data:
+  {{ .fileName }}: |
+    {{- .data | nindent 4 }}
+{{- end }}
+{{- end }}
+{{- with $g.driver.certConfig }}
+{{- if .data }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .name }}
+  namespace: {{ $ns }}
+data:
+  {{ .fileName }}: |
+    {{- .data | nindent 4 }}
+{{- end }}
+{{- end }}
+{{- end }}

@@ -1,0 +1,81 @@
+{{- if .Values.gpu.enabled }}
+{{- $g := .Values.gpu }}
+{{- if and $g.timeSlicing.enabled (ne $g.mig.strategy "none") }}
+{{- fail "gpu.timeSlicing.enabled and gpu.mig.strategy != none are mutually exclusive in this chart: pick MIG, time-slicing or whole-GPU" }}
+{{- end }}
+{{- if not (has $g.mig.strategy (list "none" "single" "mixed")) }}
+{{- fail "gpu.mig.strategy must be none, single or mixed" }}
+{{- end }}
+# UNVERIFIED: ClusterPolicy field names follow the NVIDIA GPU Operator 25.x docs; the CRD may require more
+# top-level sections (vgpuManager, vfioManager, ...) than listed here. Check with `oc explain clusterpolicy.spec` on site.
+apiVersion: nvidia.com/v1
+kind: ClusterPolicy
+metadata:
+  name: {{ $g.clusterPolicy.name }}
+  annotations:
+    {{- include "rhoai-config.wave" (list . "gpu") | nindent 4 }}
+spec:
+  operator:
+    defaultRuntime: crio
+    use_ocp_driver_toolkit: {{ $g.operator.useOcpDriverToolkit }}
+  daemonsets:
+    {{- with $g.daemonsets.tolerations }}
+    tolerations:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+    priorityClassName: system-node-critical
+  driver:
+    enabled: {{ $g.driver.enabled }}
+    {{- include "rhoai-config.gpuImage" (list $g.driver $g) | nindent 4 }}
+    {{- with $g.driver.repoConfig.configMapName }}
+    repoConfig:
+      configMapName: {{ . | quote }}
+    {{- end }}
+    {{- with $g.driver.certConfig.name }}
+    certConfig:
+      name: {{ . | quote }}
+    {{- end }}
+    {{- with $g.driver.env }}
+    env:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+  toolkit:
+    enabled: {{ $g.toolkit.enabled }}
+    {{- include "rhoai-config.gpuImage" (list $g.toolkit $g) | nindent 4 }}
+  devicePlugin:
+    enabled: {{ $g.devicePlugin.enabled }}
+    {{- include "rhoai-config.gpuImage" (list $g.devicePlugin $g) | nindent 4 }}
+    {{- if $g.timeSlicing.enabled }}
+    config:
+      name: {{ $g.timeSlicing.configMapName }}
+      default: {{ $g.timeSlicing.default | quote }}
+    {{- end }}
+  dcgm:
+    enabled: {{ $g.dcgm.enabled }}
+    {{- include "rhoai-config.gpuImage" (list $g.dcgm $g) | nindent 4 }}
+  dcgmExporter:
+    enabled: {{ $g.dcgmExporter.enabled }}
+    {{- include "rhoai-config.gpuImage" (list $g.dcgmExporter $g) | nindent 4 }}
+    serviceMonitor:
+      enabled: {{ $g.dcgmExporter.serviceMonitor }}
+  gfd:
+    enabled: {{ $g.gfd.enabled }}
+    {{- include "rhoai-config.gpuImage" (list $g.gfd $g) | nindent 4 }}
+  mig:
+    strategy: {{ $g.mig.strategy }}
+  migManager:
+    enabled: {{ and $g.migManager.enabled (ne $g.mig.strategy "none") }}
+    {{- include "rhoai-config.gpuImage" (list $g.migManager $g) | nindent 4 }}
+    config:
+      name: {{ $g.mig.configMapName }}
+      default: {{ $g.mig.defaultProfile | quote }}
+    {{- with $g.migManager.env }}
+    env:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+  nodeStatusExporter:
+    enabled: {{ $g.nodeStatusExporter.enabled }}
+    {{- include "rhoai-config.gpuImage" (list $g.nodeStatusExporter $g) | nindent 4 }}
+  validator:
+    {{- include "rhoai-config.gpuImage" (list $g.validator $g) | nindent 4 }}
+{{- end }}

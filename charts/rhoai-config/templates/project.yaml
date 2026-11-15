@@ -1,0 +1,12 @@
+{{- if .Values.project.enabled }}
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ .Values.project.name }}
+  labels:
+    opendatahub.io/dashboard: "true"
+    modelmesh-enabled: {{ .Values.project.modelMesh | quote }}
+  annotations:
+    openshift.io/display-name: {{ .Values.project.displayName | quote }}
+    {{- include "rhoai-config.wave" (list . "project") | nindent 4 }}
+{{- end }}

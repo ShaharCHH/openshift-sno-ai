@@ -1,0 +1,149 @@
+{{- $ns := .Values.project.name }}
+{{- /* MinIO credentials are resolved once here so the MinIO Secret and the data connection agree. */}}
+{{- $mAccess := "" }}
+{{- $mSecret := "" }}
+{{- if .Values.minio.enabled }}
+{{- if .Values.minio.auth.existingSecret }}
+{{- $ex := lookup "v1" "Secret" $ns .Values.minio.auth.existingSecret }}
+{{- if and $ex $ex.data }}
+{{- $mAccess = index $ex.data "accessKey" | b64dec }}
+{{- $mSecret = index $ex.data "secretKey" | b64dec }}
+{{- end }}
+{{- else }}
+{{- $mAccess = include "rhoai-config.cred" (list . "minio-credentials" "accessKey" .Values.minio.auth.accessKey 12 $ns) }}
+{{- $mSecret = include "rhoai-config.cred" (list . "minio-credentials" "secretKey" .Values.minio.auth.secretKey 24 $ns) }}
+{{- end }}
+{{- end }}
+{{- if .Values.minio.enabled }}
+{{- if not .Values.minio.auth.existingSecret }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: minio-credentials
+  namespace: {{ $ns }}
+  annotations:
+    {{- include "rhoai-config.wave" (list . "storage") | nindent 4 }}
+type: Opaque
+stringData:
+  accessKey: {{ $mAccess | quote }}
+  secretKey: {{ $mSecret | quote }}
+---
+{{- end }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: minio-data
+  namespace: {{ $ns }}
+  annotations:
+    {{- include "rhoai-config.wave" (list . "storage") | nindent 4 }}
+spec:
+  accessModes: [ReadWriteOnce]
+  {{- with .Values.minio.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.minio.size }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: minio
+  namespace: {{ $ns }}
+  labels:
+    app: minio
+  annotations:
+    {{- include "rhoai-config.wave" (list . "storage") | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate # RWO volume: the old pod must release it first
+  selector:
+    matchLabels:
+      app: minio
+  template:
+    metadata:
+      labels:
+        app: minio
+    spec:
+      initContainers:
+        # MinIO treats top-level directories under /data as buckets, so mkdir creates the bucket.
+        - name: make-bucket
+          image: {{ .Values.minio.initImage }}
+          command: ["sh", "-c", "mkdir -p /data/{{ .Values.s3.bucket }}"]
+          volumeMounts:
+            - { name: data, mountPath: /data }
+      containers:
+        - name: minio
+          image: {{ .Values.minio.image }}
+          args: ["server", "/data", "--console-address", ":9001"]
+          env:
+            - name: MINIO_ROOT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ default "minio-credentials" .Values.minio.auth.existingSecret }}
+                  key: accessKey
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ default "minio-credentials" .Values.minio.auth.existingSecret }}
+                  key: secretKey
+          ports:
+            - { name: s3, containerPort: 9000 }
+            - { name: console, containerPort: 9001 }
+          readinessProbe:
+            httpGet: { path: /minio/health/ready, port: 9000 }
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.minio.resources | nindent 12 }}
+          volumeMounts:
+            - { name: data, mountPath: /data }
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: minio-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio
+  namespace: {{ $ns }}
+  annotations:
+    {{- include "rhoai-config.wave" (list . "storage") | nindent 4 }}
+spec:
+  selector:
+    app: minio
+  ports:
+    - { name: s3, port: 9000, targetPort: s3 }
+    - { name: console, port: 9001, targetPort: console }
+{{- end }}
+{{- if .Values.s3.enabled }}
+{{- $endpoint := .Values.s3.endpoint }}
+{{- if and (not $endpoint) .Values.minio.enabled }}
+{{- $endpoint = printf "http://minio.%s.svc.cluster.local:9000" $ns }}
+{{- end }}
+{{- $ak := default $mAccess .Values.s3.accessKey }}
+{{- $sk := default $mSecret .Values.s3.secretKey }}
+{{- if not $endpoint }}{{ fail "s3.enabled needs s3.endpoint, or minio.enabled=true" }}{{ end }}
+{{- if or (not $ak) (not $sk) }}{{ fail "s3.enabled needs s3.accessKey and s3.secretKey, or minio.enabled=true with generated/supplied minio.auth" }}{{ end }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ .Values.s3.name }}
+  namespace: {{ $ns }}
+  labels:
+    opendatahub.io/dashboard: "true"
+    opendatahub.io/managed: "true"
+  annotations:
+    opendatahub.io/connection-type-protocol: s3 # UNVERIFIED: annotation used by the 3.x dashboard (older: connection-type-ref)
+    openshift.io/display-name: {{ .Values.s3.displayName | quote }}
+    {{- include "rhoai-config.wave" (list . "storage") | nindent 4 }}
+type: Opaque
+stringData:
+  AWS_ACCESS_KEY_ID: {{ $ak | quote }}
+  AWS_SECRET_ACCESS_KEY: {{ $sk | quote }}
+  AWS_S3_ENDPOINT: {{ $endpoint | quote }}
+  AWS_S3_BUCKET: {{ .Values.s3.bucket | quote }}
+  AWS_DEFAULT_REGION: {{ .Values.s3.region | quote }}
+{{- end }}

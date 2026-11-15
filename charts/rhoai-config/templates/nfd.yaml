@@ -1,0 +1,15 @@
+{{- if .Values.nfd.enabled }}
+apiVersion: nfd.openshift.io/v1
+kind: NodeFeatureDiscovery
+metadata:
+  name: {{ .Values.nfd.name }}
+  namespace: {{ .Values.nfd.namespace }}
+  annotations:
+    {{- include "rhoai-config.wave" (list . "nfd") | nindent 4 }}
+spec:
+  operand:
+    {{- with .Values.nfd.image }}
+    image: {{ . | quote }}
+    {{- end }}
+    servicePort: 12000
+{{- end }}

@@ -1,0 +1,6 @@
+apiVersion: v2
+name: rhoai-operators
+description: OLM Subscriptions for the OpenShift AI prerequisite operators, the NVIDIA GPU Operator and RHOAI itself (wave 0 of the bundle).
+type: application
+version: 0.1.0
+appVersion: "rhoai-3.x"

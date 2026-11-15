@@ -1,0 +1,26 @@
+# Fusion HCI (OCP 4.20, air-gapped, RHOAI 3.4, H200). Channel names must be checked against
+# the mirrored catalog: `oc get packagemanifest -n <catalog ns> <package> -o jsonpath='{.status.channels[*].name}'`.
+catalog:
+  # Air-gap: the mirrored CatalogSource built with oc-mirror (name/namespace are site choices).
+  # Created by charts/airgap-config (values/fusion-airgap.yaml `catalogs.sources[].name`): keep the names identical.
+  source: mirror-redhat-operators # UNVERIFIED: depends on the CatalogSource created on site
+  sourceNamespace: openshift-marketplace
+
+installPlanApproval: Manual # air-gap: upgrades only when the mirror is updated and approved
+
+operators:
+  certManager:
+    channel: stable-v1 # UNVERIFIED for the mirrored 4.20 catalog
+  nfd:
+    channel: stable # UNVERIFIED for the mirrored 4.20 catalog
+  kueue:
+    channel: stable-v1.0 # UNVERIFIED
+  gpu:
+    channel: v25.10 # UNVERIFIED: architecture targets GPU Operator 25.10.x
+    catalog:
+      source: mirror-certified-operators # UNVERIFIED: site-specific; defined in values/fusion-airgap.yaml
+      sourceNamespace: openshift-marketplace
+  rhoai:
+    channel: stable-3.4 # UNVERIFIED: RHOAI 3.4 channel name not confirmed; may be stable-3.x
+    # startingCSV: rhods-operator.3.4.x   # pin once the exact mirrored version is known
+    resources: null # full-size cluster: keep CSV default requests (null deletes the chart default; {} would not)

@@ -1,0 +1,262 @@
+# Generic defaults. Overlays: ../values/sno-config.yaml, ../values/fusion-config.yaml.
+# Apply ONLY after rhoai-operators: the CRDs below come from those operators.
+
+# Argo CD sync waves; they continue after the operators chart (-10 .. 2).
+syncWaves:
+  project: 3
+  nfd: 3
+  dsci: 4
+  dsc: 5
+  storage: 6
+  serving: 7
+  gpu: 4 # ClusterPolicy + MIG/time-slicing ConfigMaps (after NFD, before DSC)
+  gpuQueues: 8 # Kueue flavors/queues (needs the Kueue operator CRDs)
+
+# Node Feature Discovery instance (needs the NFD operator from the operators chart).
+nfd:
+  enabled: true
+  namespace: openshift-nfd
+  name: nfd-instance
+  # Operand image. Empty = the operator's default (OLM injects it). Air-gap: set a mirrored image.
+  image: ""
+
+# DSCInitialization. Passed through as spec so version differences stay a values change.
+dsci:
+  enabled: true
+  name: default-dsci
+  spec:
+    applicationsNamespace: redhat-ods-applications
+    monitoring:
+      managementState: Managed
+      namespace: redhat-ods-monitoring
+    trustedCABundle:
+      managementState: Managed
+      customCABundle: ""
+
+# DataScienceCluster. Every component is a value: { managementState: Managed|Removed|Unmanaged, ...extra spec }.
+dsc:
+  enabled: true
+  name: default-dsc
+  apiVersion: datasciencecluster.opendatahub.io/v2
+  components:
+    aigateway: { managementState: Removed }
+    aipipelines: { managementState: Removed }
+    dashboard: { managementState: Managed }
+    feastoperator: { managementState: Removed }
+    kserve: { managementState: Managed }
+    kueue: { managementState: Removed }
+    llamastackoperator: { managementState: Removed }
+    mcplifecycleoperator: { managementState: Removed }
+    mlflowoperator: { managementState: Removed }
+    modelregistry: { managementState: Removed }
+    ogx: { managementState: Removed }
+    ray: { managementState: Removed }
+    sparkoperator: { managementState: Removed }
+    trainer: { managementState: Removed }
+    trainingoperator: { managementState: Removed }
+    trustyai: { managementState: Removed }
+    workbenches: { managementState: Managed }
+
+# Data science project (namespace) that holds MinIO, the data connection and the example model.
+project:
+  enabled: true
+  name: rhoai-poc
+  displayName: RHOAI PoC
+  # kserve-style projects must not be modelmesh projects.
+  modelMesh: false
+
+# S3 data connection (a Secret the RHOAI dashboard lists under "Connections").
+# Credentials: leave empty to use MinIO's credentials when minio.enabled, else supply real values
+# from your own values file / secret manager. NEVER commit real keys.
+s3:
+  enabled: true
+  name: poc-s3
+  displayName: PoC S3
+  # Empty + minio.enabled = in-cluster MinIO service.
+  endpoint: ""
+  bucket: models
+  region: us-east-1
+  accessKey: ""
+  secretKey: ""
+
+# MinIO (single pod, one PVC). For the SNO. Fusion uses external S3 (StorageGRID / ONTAP S3).
+minio:
+  enabled: false
+  image: quay.io/minio/minio:RELEASE.2024-12-18T13-15-44Z # UNVERIFIED tag; egress to quay.io from the SNO is untested. Air-gap: mirror it.
+  initImage: registry.access.redhat.com/ubi9/ubi-minimal:latest # UNVERIFIED; only used to pre-create the bucket directory
+  storageClass: "" # empty = cluster default StorageClass
+  size: 10Gi
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { memory: 512Mi }
+  auth:
+    # Option A (default): generated on first install, then reused on upgrade via `lookup`.
+    #   `lookup` returns nothing under `helm template` and Argo CD, so use B or C there.
+    # Option B: set accessKey / secretKey here (secretKey >= 8 chars) from an untracked values file.
+    accessKey: ""
+    secretKey: ""
+    # Option C: a Secret you created with keys accessKey and secretKey; the chart then creates none
+    # for MinIO. The data connection still needs s3.accessKey/secretKey (or leave s3.enabled false).
+    existingSecret: ""
+
+# MySQL for the model registry (off on the SNO).
+mysql:
+  enabled: false
+  image: registry.redhat.io/rhel9/mysql-80:latest # UNVERIFIED tag; pin a digest on site
+  namespace: "" # empty = project.name
+  database: modelregistry
+  user: mlmd
+  storageClass: ""
+  size: 5Gi
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+  # Generated like MinIO's when empty (lookup-based); or reference an existing Secret with key
+  # `database-password` (and `database-root-password`).
+  password: ""
+  existingSecret: ""
+
+# Tiny CPU model: ServingRuntime + InferenceService. Disabled by default.
+# The model files must already be in the bucket under serving.model.path (see charts/README.md).
+serving:
+  enabled: false
+  runtime:
+    name: ovms-cpu
+    displayName: OpenVINO Model Server (CPU)
+    # REQUIRED when enabled. Copy the image from the template RHOAI ships:
+    #   oc get template -n redhat-ods-applications -o yaml | grep -i ovms -A3 | grep image
+    # UNVERIFIED: the exact template / image name for RHOAI 3.5.
+    image: ""
+    cpu: { request: 250m, limit: "1" }
+    memory: { request: 512Mi, limit: 1Gi }
+  model:
+    name: tiny-model
+    # UNVERIFIED model formats the runtime accepts; ovms takes openvino_ir and onnx.
+    format: onnx
+    formatVersion: "1"
+    path: tiny-model/ # prefix inside s3.bucket
+  # RawDeployment avoids Knative / Service Mesh, which the SNO does not have headroom for.
+  deploymentMode: RawDeployment
+
+# NVIDIA GPU Operator instance: ClusterPolicy, MIG (mig-parted) ConfigMap, time-slicing option,
+# node label/taint plan, Kueue GPU queues. Off by default; on only in values/fusion-config.yaml.
+# Needs the GPU Operator + NFD from rhoai-operators. The SNO has no GPU, so there it is never applied.
+# Decision MIG vs time-slicing vs whole-GPU = values only:
+#   whole GPU:     mig.strategy: none,  timeSlicing.enabled: false
+#   MIG:           mig.strategy: single|mixed (+ per-node label nvidia.com/mig.config)
+#   time-slicing:  mig.strategy: none,  timeSlicing.enabled: true
+gpu:
+  enabled: false
+  namespace: nvidia-gpu-operator # must match the namespace of the GPU Operator Subscription
+  clusterPolicy:
+    name: gpu-cluster-policy
+  # Air-gap: a mirror registry path for ALL components (empty = operator's own defaults, injected by OLM).
+  # Per-component repository/image/version below override it. No public registry is hardcoded.
+  repository: ""
+  imagePullSecrets: [] # names of pull Secrets that exist in `namespace`, e.g. [mirror-pull-secret]
+  operator:
+    useOcpDriverToolkit: true # OpenShift builds the driver from the Driver Toolkit image of the release
+  daemonsets:
+    tolerations:
+      - { key: nvidia.com/gpu, operator: Exists, effect: NoSchedule }
+  driver:
+    enabled: true
+    repository: ""
+    image: "" # e.g. driver
+    version: "" # UNVERIFIED: pin to the driver branch NVIDIA lists for the GPU Operator 25.10 + H200
+    env: [] # e.g. [{name: HTTPS_PROXY, value: ...}]
+    # Air-gap: package repo definition (a yum .repo file) for the driver pod; ConfigMap rendered here if data is set.
+    repoConfig:
+      configMapName: ""
+      fileName: custom.repo
+      data: ""
+    # Corporate CA bundle so the driver pod trusts the internal mirror; ConfigMap rendered here if data is set.
+    certConfig:
+      name: ""
+      fileName: ca-bundle.crt # UNVERIFIED file name the operator expects
+      data: ""
+  toolkit: { enabled: true, repository: "", image: "", version: "" }
+  devicePlugin: { enabled: true, repository: "", image: "", version: "" }
+  dcgm: { enabled: true, repository: "", image: "", version: "" }
+  dcgmExporter: { enabled: true, repository: "", image: "", version: "", serviceMonitor: true }
+  gfd: { enabled: true, repository: "", image: "", version: "" }
+  nodeStatusExporter: { enabled: true, repository: "", image: "", version: "" }
+  validator: { repository: "", image: "", version: "" }
+  migManager:
+    enabled: true # only rendered enabled when mig.strategy != none
+    repository: ""
+    image: ""
+    version: ""
+    env: [] # CSP/VM nodes that cannot reset the GPU: [{name: WITH_REBOOT, value: "true"}]
+
+  mig:
+    strategy: none # none | single | mixed. single = one profile on every GPU; mixed = several profiles / some GPUs whole.
+    configMapName: custom-mig-config
+    defaultProfile: all-disabled # applied to nodes without an nvidia.com/mig.config label
+    # mig-parted profiles. A node picks one with: oc label node <n> nvidia.com/mig.config=<profile name>.
+    # Custom config REPLACES the operator's built-in profiles, so keep all-disabled here.
+    profiles:
+      all-disabled:
+        - devices: all
+          mig-enabled: false
+      # H200 NVL = 141 GB. Profile names below follow the pattern of the H100 profiles in the NVIDIA docs
+      # (1g.10gb, 3g.40gb ...). UNVERIFIED for H200: confirm with `nvidia-smi mig -lgip` on the real card.
+      h200-whole:
+        - devices: all
+          mig-enabled: false
+      # GPUs 0-3 stay whole, GPUs 4-7 split in 7 small slices (needs strategy: mixed).
+      h200-half-whole-half-small:
+        - devices: [0, 1, 2, 3]
+          mig-enabled: false
+        - devices: [4, 5, 6, 7]
+          mig-enabled: true
+          mig-devices:
+            "1g.18gb": 7 # UNVERIFIED H200 profile name
+      # GPUs 0-1 whole, 2-3 as 2 large slices, 4-7 as 4 medium slices each (needs strategy: mixed).
+      h200-whole-large-medium:
+        - devices: [0, 1]
+          mig-enabled: false
+        - devices: [2, 3]
+          mig-enabled: true
+          mig-devices:
+            "3g.71gb": 2 # UNVERIFIED H200 profile name
+        - devices: [4, 5, 6, 7]
+          mig-enabled: true
+          mig-devices:
+            "1g.35gb": 4 # UNVERIFIED H200 profile name
+
+  # Time-slicing (device plugin sharing). Mutually exclusive with MIG in this chart (render fails if both on).
+  timeSlicing:
+    enabled: false
+    configMapName: time-slicing-config
+    default: any # key inside the ConfigMap, also the default config name
+    replicas: 4
+    renameByDefault: false
+
+  # Taint that keeps non-GPU workloads off GPU nodes. Applied by the rendered node plan, tolerated by Kueue flavors.
+  taint:
+    enabled: true
+    key: nvidia.com/gpu
+    value: "present"
+    effect: NoSchedule
+
+  # Rendered into ConfigMap gpu-node-plan (apply.sh) for you to review and run. Helm never edits Node objects.
+  nodes: []
+  #  - name: gpu-node-1.example.internal   # UNVERIFIED site node name
+  #    migConfig: h200-half-whole-half-small
+  #    labels: { gpu-pool: h200 }
+
+  # Kueue example: whole-GPU vs MIG-slice quota. Needs Kueue Managed (dsc.components.kueue).
+  kueue:
+    enabled: false
+    wholeNodeLabels: { nvidia.com/mig.config: h200-whole } # UNVERIFIED selector; match your whole-GPU nodes
+    migNodeLabels: { nvidia.com/mig.config: h200-half-whole-half-small }
+    clusterQueue:
+      name: gpu-cq
+      cpu: "64"
+      memory: 512Gi
+      wholeGpus: 4
+      migSlices: # resource nvidia.com/mig-<profile> (mixed strategy naming) : quota
+        "1g.18gb": 28 # UNVERIFIED H200 profile name
+    localQueue:
+      name: gpu-lq
+      namespace: "" # empty = project.name
